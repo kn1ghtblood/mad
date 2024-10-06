@@ -1,9 +1,12 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use eframe::egui;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{
     fs::{self, File},
     io::{self, Write},
+    os::windows::process::CommandExt,
     path::Path,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -20,6 +23,14 @@ const VIDEO_PLAYLIST_SUFFIX: &str = "/playlist.m3u8";
 
 static COUNTER: Lazy<Arc<Mutex<i32>>> = Lazy::new(|| Arc::new(Mutex::new(0)));
 
+static GLOBAL_LOG: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+pub fn log_message(message: String) {
+    if let Ok(mut log) = GLOBAL_LOG.lock() {
+        log.clear();
+        log.push(message);
+    }
+}
 struct VideoDownloader {
     input: String,
     progress: f32,
@@ -45,34 +56,62 @@ impl Default for VideoDownloader {
 impl eframe::App for VideoDownloader {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("MADownloader");
+            ui.vertical_centered(|ui| {
+                ui.heading("MADownloader");
+                ui.add_space(30.0);
 
-            ui.horizontal(|ui| {
+                // ui.horizontal(|ui| {
                 ui.label("URL:");
-                ui.text_edit_singleline(&mut self.input);
-            });
+                // ui.text_edit_singleline(&mut self.input);
+                ui.add(egui::TextEdit::singleline(&mut self.input).hint_text("Paste link here"));
+                // });
 
-            if !self.is_downloading {
-                if ui.button("Download").clicked() {
-                    self.start_download();
-                }
-            } else {
-                if ui.button("Cancel").clicked() {
-                    self.cancel_download();
-                    self.progress = 0.0;
-                }
-            }
-
-            ui.add(egui::ProgressBar::new(self.progress).show_percentage());
-
-            if let Some(receiver) = &mut self.progress_receiver {
-                if let Ok(progress) = receiver.try_recv() {
-                    self.progress = progress;
-                    if progress >= 1.0 {
-                        self.is_downloading = false;
+                ui.add_space(20.0);
+                if !self.is_downloading {
+                    // if ui.button("Download").clicked() {
+                    if ui
+                        .add_sized([120.0, 25.0], egui::Button::new("Download"))
+                        .clicked()
+                        && !self.input.is_empty()
+                    {
+                        self.start_download();
+                    }
+                } else {
+                    // if ui.button("Cancel").clicked() {
+                    if ui
+                        .add_sized([120.0, 25.0], egui::Button::new("Cancel"))
+                        .clicked()
+                    {
+                        self.cancel_download();
+                        self.progress = 0.0;
                     }
                 }
-            }
+                ui.add_space(20.0);
+                if self.is_downloading {
+                    ui.add(
+                        egui::ProgressBar::new(self.progress)
+                            .show_percentage()
+                            .animate(true),
+                    );
+                }
+
+                if let Some(receiver) = &mut self.progress_receiver {
+                    if let Ok(progress) = receiver.try_recv() {
+                        self.progress = progress;
+                        if progress >= 1.0 {
+                            self.is_downloading = false;
+                        }
+                    }
+                }
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+                if let Ok(log) = GLOBAL_LOG.lock() {
+                    if let Some(msg) = log.last() {
+                        ui.label(msg);
+                    }
+                }
+            });
         });
 
         ctx.request_repaint();
@@ -82,6 +121,7 @@ impl eframe::App for VideoDownloader {
 impl VideoDownloader {
     fn start_download(&mut self) {
         let url = self.input.clone();
+        log_message(format!("Fetching Information..."));
         let (progress_sender, progress_receiver) = mpsc::channel(100);
         let (cancel_sender, _) = broadcast::channel(1);
 
@@ -106,12 +146,13 @@ impl VideoDownloader {
             handle.abort();
         }
         // Temp fix for race condition
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(1000));
         match delete_all_subfolders(SAVE_PATH) {
             Ok(_) => println!("successfully deleted temp files"),
             Err(e) => eprintln!("{}", e),
         }
         println!("Download cancelled");
+        log_message(format!("Download cancelled"));
     }
 }
 
@@ -193,6 +234,7 @@ fn make_folders(name: &str) -> io::Result<()> {
     let path = format!("{}/{}", SAVE_PATH, name);
     fs::create_dir_all(&path)?;
     println!("Created directory: {}", path);
+    log_message(format!("Created directory: {}", path));
     Ok(())
 }
 
@@ -238,6 +280,7 @@ async fn download_jpegs_frames(
     progress_sender: mpsc::Sender<f32>,
     cancel_sender: broadcast::Sender<()>,
 ) -> Result<(), String> {
+    log_message(format!("Download Started...Please wait"));
     let total_frames = video_offset_max + 1;
     let mut handles = vec![];
 
@@ -262,8 +305,9 @@ async fn download_jpegs_frames(
                         fs::create_dir_all(parent).expect("Failed to create directories");
                     }
 
-                    if let Err(_) =
-                        File::create(&file_path).and_then(|mut file| file.write_all(&content))
+                    if File::create(&file_path)
+                        .and_then(|mut file| file.write_all(&content))
+                        .is_err()
                     {
                         eprintln!("Failed to write file: {}", file_path);
                         continue;
@@ -278,6 +322,7 @@ async fn download_jpegs_frames(
                     let _ = progress_sender.send(progress).await;
                 } else {
                     eprintln!("Failed to download: {}", url_tmp);
+                    log_message(format!("Failed to download: {}", url_tmp));
                 }
             }
             Ok(())
@@ -309,10 +354,12 @@ fn request_with_retry(url: &str) -> Option<Vec<u8>> {
             _ => thread::sleep(delay),
         }
     }
+    log_message(format!("Request timed out! Check the URL"));
     None
 }
 
 fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
+    log_message(format!("Video processing started...Please wait"));
     let list_file = format!("{}/{}/list.txt", SAVE_PATH, name);
     let mut list_txt = File::create(&list_file)?;
 
@@ -346,7 +393,7 @@ fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
     };
 
     let status = Command::new(ffmpeg_path)
-        .args(&[
+        .args([
             "-f",
             "concat",
             "-safe",
@@ -358,14 +405,18 @@ fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
             &out_file_name,
         ])
         .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
         .status()?;
 
     if status.success() {
-        println!("FFmpeg execution completed.");
         match delete_all_subfolders(SAVE_PATH) {
             Ok(_) => println!("successfully deleted temp files"),
             Err(e) => eprintln!("{}", e),
         }
+        println!("FFmpeg execution completed.");
+        log_message(format!("SUCCESS!!! Output Saved to : {}", SAVE_PATH));
         Ok(())
     } else {
         Err(io::Error::new(
