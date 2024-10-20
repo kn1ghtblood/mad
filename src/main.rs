@@ -92,6 +92,13 @@ impl eframe::App for VideoDownloader {
                         self.progress = 0.0;
                     }
                 }
+                ui.add_space(10.0);
+                if ui
+                    .add_sized([120.0, 25.0], egui::Button::new("Open Folder"))
+                    .clicked()
+                {
+                    self.open_downloads_folder();
+                }
                 ui.add_space(20.0);
                 if self.is_downloading {
                     ui.add(
@@ -159,6 +166,27 @@ impl VideoDownloader {
         }
         println!("Download cancelled");
         log_message(format!("Download cancelled"));
+    }
+
+    fn open_downloads_folder(&mut self) {
+        let path = Path::new(SAVE_PATH);
+
+        if !path.exists() {
+            return log_message(format!("Downloads folder not found!"));
+        }
+
+        let _status = if cfg!(target_os = "windows") {
+            Command::new("explorer")
+        } else if cfg!(target_os = "linux") {
+            Command::new("xdg-open")
+        } else if cfg!(target_os = "macos") {
+            Command::new("open")
+        } else {
+            return log_message(format!("Unsupported operating system"));
+        }
+        .arg(path)
+        .status()
+        .map_err(|e| format!("Failed to open folder: {}", e));
     }
 }
 
