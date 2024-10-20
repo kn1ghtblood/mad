@@ -4,9 +4,10 @@ use eframe::egui;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{
+    ffi::CString,
     fs::{self, File},
     io::{self, Write},
-    os::windows::process::CommandExt,
+    os::{raw::c_char, windows::process::CommandExt},
     path::Path,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -15,6 +16,11 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc};
 use ureq;
+
+#[link(name = "framecat", kind = "dylib")] // Link to the shared library (DLL)
+extern "C" {
+    fn fconcat(input_list_filename: *const c_char, output_filename: *const c_char) -> i32;
+}
 
 // const SAVE_PATH: &str = "temp";
 const SAVE_PATH: &str = "downloads";
@@ -201,7 +207,8 @@ async fn download(
     if result.is_ok() {
         let file_path = format!("{}/{}.mp4", SAVE_PATH, movie_name);
         if !Path::new(&file_path).exists() {
-            frames_to_video_ffmpeg(&movie_name, digit)?;
+            // frames_to_video_ffmpeg(&movie_name, digit)?;
+            frame_concat(&movie_name, digit)?;
         }
     }
 
@@ -356,6 +363,38 @@ fn request_with_retry(url: &str) -> Option<Vec<u8>> {
     }
     log_message(format!("Request timed out! Check the URL"));
     None
+}
+
+fn frame_concat(name: &str, total_frames: i32) -> io::Result<()> {
+    let list_file = format!("{}/{}/list.txt", SAVE_PATH, name);
+    let mut list_txt = File::create(&list_file)?;
+
+    for i in 0..=total_frames {
+        let file_path = format!("{}/{}/video{}.jpeg", SAVE_PATH, name, i);
+        if Path::new(&file_path).exists() {
+            writeln!(list_txt, "{}/{}/video{}.jpeg", SAVE_PATH, name, i)?;
+        }
+    }
+    let out_file_name = format!("{}/{}.mp4", SAVE_PATH, name);
+    let list = CString::new(list_file).expect("Failed to parse list file");
+    let out = CString::new(out_file_name).expect("Failed to parse file name");
+    unsafe {
+        let result = fconcat(list.as_ptr(), out.as_ptr());
+        if result == 0 {
+            match delete_all_subfolders(SAVE_PATH) {
+                Ok(_) => println!("successfully deleted temp files"),
+                Err(e) => eprintln!("{}", e),
+            }
+            println!("FFmpeg execution completed.");
+            log_message(format!("SUCCESS!!! Output Saved to : {}", SAVE_PATH));
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("video processing failed for movie: {}", name),
+            ))
+        }
+    }
 }
 
 fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
