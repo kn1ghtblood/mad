@@ -64,7 +64,7 @@ impl eframe::App for VideoDownloader {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("MADownloader");
-                ui.add_space(30.0);
+                ui.add_space(20.0);
 
                 // ui.horizontal(|ui| {
                 ui.label("URL:");
@@ -394,6 +394,7 @@ fn request_with_retry(url: &str) -> Option<Vec<u8>> {
 }
 
 fn frame_concat(name: &str, total_frames: i32) -> io::Result<()> {
+    log_message(format!("Video processing started...Please wait"));
     let list_file = format!("{}/{}/list.txt", SAVE_PATH, name);
     let mut list_txt = File::create(&list_file)?;
 
@@ -426,7 +427,9 @@ fn frame_concat(name: &str, total_frames: i32) -> io::Result<()> {
 }
 
 fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
-    log_message(format!("Video processing started...Please wait"));
+    log_message(format!(
+        "FFMPEG Detected.\nVideo processing started...Please wait"
+    ));
     let list_file = format!("{}/{}/list.txt", SAVE_PATH, name);
     let mut list_txt = File::create(&list_file)?;
 
