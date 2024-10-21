@@ -235,13 +235,23 @@ async fn download(
     if result.is_ok() {
         let file_path = format!("{}/{}.mp4", SAVE_PATH, movie_name);
         if !Path::new(&file_path).exists() {
-            // frames_to_video_ffmpeg(&movie_name, digit)?;
-            frame_concat(&movie_name, digit)?;
+            if ffmpeg_check() {
+                frames_to_video_ffmpeg(&movie_name, digit)?;
+            } else {
+                frame_concat(&movie_name, digit)?;
+            }
         }
     }
 
     reset_counter();
     Ok(())
+}
+
+fn ffmpeg_check() -> bool {
+    Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .map_or(false, |output| output.status.success())
 }
 
 fn reset_counter() {
