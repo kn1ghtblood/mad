@@ -67,9 +67,12 @@ impl eframe::App for VideoDownloader {
                 ui.add_space(20.0);
 
                 // ui.horizontal(|ui| {
-                ui.label("URL:");
+                ui.label("Enter the magic words:");
                 // ui.text_edit_singleline(&mut self.input);
-                ui.add(egui::TextEdit::singleline(&mut self.input).hint_text("Paste link here"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.input)
+                        .hint_text("You know what to put here"),
+                );
                 // });
 
                 ui.add_space(20.0);
@@ -121,7 +124,8 @@ impl eframe::App for VideoDownloader {
                 ui.add_space(10.0);
                 if let Ok(log) = GLOBAL_LOG.lock() {
                     if let Some(msg) = log.last() {
-                        ui.label(msg);
+                        // ui.label(msg);
+                        ui.label(egui::RichText::new(msg).size(14.0));
                     }
                 }
             });
@@ -195,7 +199,12 @@ async fn download(
     progress_sender: mpsc::Sender<f32>,
     cancel_sender: broadcast::Sender<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let uuid = get_uuid(&url).await?;
+    let f_url = if url.starts_with("https://") && url.contains(".com") {
+        url.clone()
+    } else {
+        format!("https://missav.com/{}", url)
+    };
+    let uuid = get_uuid(&f_url).await?;
     let playlist_url = format!("{}{}{}", VIDEO_M3U8_PREFIX, uuid, VIDEO_PLAYLIST_SUFFIX);
     let playlist = ureq::get(&playlist_url).call()?.into_string()?;
 
@@ -516,7 +525,7 @@ async fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     eframe::run_native(
-        "MAd Beta 0.1.0",
+        "MAd Beta 0.5.0",
         options,
         Box::new(|_cc| Ok(Box::new(VideoDownloader::default()))),
     )
