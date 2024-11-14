@@ -434,7 +434,7 @@ fn frame_concat(name: &str, total_frames: i32) -> io::Result<()> {
                 Err(e) => eprintln!("{}", e),
             }
             println!("FFmpeg execution completed.");
-            log_message(format!("SUCCESS!!! Output Saved to : {}", SAVE_PATH));
+            log_message(format!("SUCCESS!!!\nOutput Saved to : {}", SAVE_PATH));
             Ok(())
         } else {
             Err(io::Error::new(
@@ -471,9 +471,9 @@ fn frames_to_video_ffmpeg(name: &str, total_frames: i32) -> io::Result<()> {
     let out_file_name = format!("{}/{}.mp4", SAVE_PATH, name);
 
     let ffmpeg_path = if cfg!(target_os = "windows") {
-        "bin/ffmpeg.exe"
+        "ffmpeg.exe"
     } else if cfg!(target_os = "linux") {
-        "bin/ffmpeg"
+        "ffmpeg"
     } else {
         return Err(io::Error::new(
             io::ErrorKind::Other,
